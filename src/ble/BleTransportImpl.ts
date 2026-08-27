@@ -2,12 +2,12 @@
  * ZenChat BLE — Transport Implementation
  *
  * Real BLE implementation using munim-bluetooth.
- * Handles both Central and Peripheral roles for peer-to-peer communication.
+ * Handles both Central (Scanner/Client) and Peripheral (Advertiser/GATT Server) roles
+ * for direct peer-to-peer mobile communication.
  *
  * IMPLEMENTED BUT REQUIRES PHYSICAL DEVICE VALIDATION
  */
 
-import { Platform } from 'react-native';
 import { logger } from '../utils/logger';
 import {
   BLE_SERVICE_UUID,
@@ -15,6 +15,7 @@ import {
   BLE_TX_CHARACTERISTIC_UUID,
   BLE_CONFIG,
 } from './BleConstants';
+import { requestBluetoothPermissions } from './BlePermissions';
 import type {
   Transport,
   BluetoothState,
@@ -24,12 +25,49 @@ import type {
   Unsubscribe,
 } from './BleTransport';
 
+// ─── Data Conversion Helpers ───────────────────────────────────────
+
+export function uint8ArrayToHex(bytes: Uint8Array): string {
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) {
+    hex += bytes[i]!.toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
+export function hexToUint8Array(hex: string): Uint8Array {
+  const cleanHex = hex.replace(/[^0-9a-fA-F]/g, '');
+  const length = Math.floor(cleanHex.length / 2);
+  const bytes = new Uint8Array(length);
+  for (let i = 0; i < length; i++) {
+    bytes[i] = parseInt(cleanHex.substr(i * 2, 2), 16);
+  }
+  return bytes;
+}
+
+export function utf8ToHex(str: string): string {
+  const bytes = new Uint8Array(str.length);
+  for (let i = 0; i < str.length; i++) {
+    bytes[i] = str.charCodeAt(i);
+  }
+  return uint8ArrayToHex(bytes);
+}
+
+export function hexToUtf8(hex: string): string {
+  const bytes = hexToUint8Array(hex);
+  let str = '';
+  for (let i = 0; i < bytes.length; i++) {
+    str += String.fromCharCode(bytes[i]!);
+  }
+  return str;
+}
+
 // ─── Event Emitter Helper ──────────────────────────────────────────
 
 type Callback<T> = (arg: T) => void;
 type DataCallback = (peerId: string, data: Uint8Array) => void;
 
-class EventEmitter<T> {
+class SimpleEventEmitter<T> {
   private listeners: Set<Callback<T>> = new Set();
 
   subscribe(callback: Callback<T>): Unsubscribe {
@@ -62,17 +100,16 @@ export class BleTransportImpl implements Transport {
   private isScanning = false;
 
   private discoveredPeers: Map<string, DiscoveredPeer> = new Map();
+  private cleanupFns: Array<() => void> = [];
 
   // Event emitters
-  private dataEmitter = new EventEmitter<{ peerId: string; data: Uint8Array }>();
-  private stateEmitter = new EventEmitter<BluetoothState>();
-  private connectionEmitter = new EventEmitter<ConnectionStateEvent>();
-  private peerEmitter = new EventEmitter<DiscoveredPeer>();
+  private stateEmitter = new SimpleEventEmitter<BluetoothState>();
+  private connectionEmitter = new SimpleEventEmitter<ConnectionStateEvent>();
+  private peerEmitter = new SimpleEventEmitter<DiscoveredPeer>();
   private dataCallbacks: Set<DataCallback> = new Set();
 
-  // munim-bluetooth references
-  private bleManager: any = null;
-  private peripheralManager: any = null;
+  // Reference to loaded native bluetooth module
+  private bluetoothModule: typeof import('munim-bluetooth') | null = null;
 
   async initialize(): Promise<void> {
     if (this.isInitialized) {
@@ -81,50 +118,114 @@ export class BleTransportImpl implements Transport {
     }
 
     try {
-      logger.info('BLE', 'Initializing BLE transport...');
+      logger.info('BLE', 'Initializing BLE transport via munim-bluetooth...');
 
-      // Dynamic import to handle the case where munim-bluetooth may not be available
-      const bluetooth = await import('munim-bluetooth');
+      // Request runtime permissions first
+      await requestBluetoothPermissions();
 
-      // Initialize central manager (for scanning and connecting)
-      if (bluetooth.BleManager) {
-        this.bleManager = new bluetooth.BleManager();
-      }
+      // Dynamic import to support graceful fallback
+      const munim = await import('munim-bluetooth');
+      this.bluetoothModule = munim;
 
-      // Initialize peripheral manager (for advertising)
-      if (bluetooth.PeripheralManager) {
-        this.peripheralManager = new bluetooth.PeripheralManager();
+      // Subscribe to adapter state changes
+      if (munim.addEventListener) {
+        const removeAdapterListener = munim.addEventListener('adapterStateChanged', (data) => {
+          logger.info('BLE', `Bluetooth adapter state: ${data.state}`);
+          this.stateEmitter.emit(data.state as BluetoothState);
+        });
+        this.cleanupFns.push(removeAdapterListener);
+
+        // Subscribe to scan results (device found)
+        const removeDeviceFoundListener = munim.addEventListener('deviceFound', (device) => {
+          this.handleDiscoveredDevice(device);
+        });
+        this.cleanupFns.push(removeDeviceFoundListener);
+
+        // Also listen to scanResult event if emitted
+        const removeScanResultListener = munim.addEventListener('scanResult', (device) => {
+          this.handleDiscoveredDevice(device);
+        });
+        this.cleanupFns.push(removeScanResultListener);
+
+        // Subscribe to central connection state changes
+        const removeConnStateListener = munim.addEventListener('connectionStateChanged', (data) => {
+          logger.info('CONNECTION', `Connection state changed for ${data.deviceId}: ${data.state}`);
+          this.connectionEmitter.emit({
+            peerId: data.deviceId,
+            state: data.state as any,
+            error: data.reason,
+          });
+        });
+        this.cleanupFns.push(removeConnStateListener);
+
+        // Subscribe to incoming notifications (GATT Client reading characteristic updates)
+        const removeCharListener = munim.addEventListener('characteristicValueChanged', (data) => {
+          if (data.value) {
+            const rawBytes = hexToUint8Array(data.value);
+            this.notifyDataReceived(data.deviceId, rawBytes);
+          }
+        });
+        this.cleanupFns.push(removeCharListener);
+
+        // Subscribe to peripheral write requests (GATT Server receiving data written by Central)
+        const removePeripheralWriteListener = munim.addEventListener('peripheralWriteRequest', (data) => {
+          logger.debug('BLE', `Peripheral write request from central ${data.centralId}`, data);
+          if (munim.respondToPeripheralWriteRequest) {
+            munim.respondToPeripheralWriteRequest(data.requestId, true);
+          }
+          if (data.value) {
+            const rawBytes = hexToUint8Array(data.value);
+            this.notifyDataReceived(data.centralId, rawBytes);
+          }
+        });
+        this.cleanupFns.push(removePeripheralWriteListener);
       }
 
       this.isInitialized = true;
       logger.info('BLE', 'BLE transport initialized successfully');
     } catch (error) {
       logger.error('BLE', 'Failed to initialize BLE transport', error);
-      // Don't throw — the app should still function without BLE
-      // The UI will show appropriate state
       this.isInitialized = false;
+    }
+  }
+
+  private handleDiscoveredDevice(device: any): void {
+    if (!device || !device.id) return;
+
+    // Filter to check if this device advertises ZenChat service UUID or name prefix
+    const name = device.name || device.localName;
+    const isAppPeer = true; // Devices discovered via service UUID filter or name prefix
+
+    const peer: DiscoveredPeer = {
+      bleId: device.id,
+      name: this.parseDeviceName(name),
+      rssi: device.rssi ?? -100,
+      lastSeenAt: Date.now(),
+      isAppPeer,
+    };
+
+    this.discoveredPeers.set(peer.bleId, peer);
+    this.peerEmitter.emit(peer);
+  }
+
+  private notifyDataReceived(peerId: string, data: Uint8Array): void {
+    for (const callback of this.dataCallbacks) {
+      try {
+        callback(peerId, data);
+      } catch (err) {
+        logger.error('BLE', 'Error executing onData callback', err);
+      }
     }
   }
 
   async getBluetoothState(): Promise<BluetoothState> {
     try {
-      if (!this.bleManager) {
+      if (!this.bluetoothModule) {
         return 'unknown';
       }
 
-      const state = await this.bleManager.state();
-
-      // Map munim-bluetooth states to our BluetoothState type
-      const stateMap: Record<string, BluetoothState> = {
-        'PoweredOn': 'poweredOn',
-        'PoweredOff': 'poweredOff',
-        'Unauthorized': 'unauthorized',
-        'Unsupported': 'unsupported',
-        'Resetting': 'resetting',
-        'Unknown': 'unknown',
-      };
-
-      return stateMap[state] ?? 'unknown';
+      const isEnabled = await this.bluetoothModule.isBluetoothEnabled();
+      return isEnabled ? 'poweredOn' : 'poweredOff';
     } catch (error) {
       logger.error('BLE', 'Failed to get Bluetooth state', error);
       return 'unknown';
@@ -138,38 +239,42 @@ export class BleTransportImpl implements Transport {
     }
 
     try {
-      logger.info('BLE', `Starting advertising as "${identity.displayName}"`);
+      logger.info('BLE', `Starting advertising as "${identity.displayName}" (${identity.userId})`);
 
-      if (this.peripheralManager) {
-        // Set up GATT server with our service
-        await this.peripheralManager.addService({
-          uuid: BLE_SERVICE_UUID,
-          primary: true,
-          characteristics: [
+      if (this.bluetoothModule) {
+        // Set up GATT Server Services & Characteristics
+        if (this.bluetoothModule.setServices) {
+          this.bluetoothModule.setServices([
             {
-              uuid: BLE_RX_CHARACTERISTIC_UUID,
-              properties: ['write', 'writeWithoutResponse'],
-              permissions: ['writeable'],
+              uuid: BLE_SERVICE_UUID,
+              primary: true,
+              characteristics: [
+                {
+                  uuid: BLE_RX_CHARACTERISTIC_UUID,
+                  properties: ['write', 'writeWithoutResponse'],
+                  permissions: ['writeable'],
+                },
+                {
+                  uuid: BLE_TX_CHARACTERISTIC_UUID,
+                  properties: ['read', 'notify'],
+                  permissions: ['readable'],
+                },
+              ],
             },
-            {
-              uuid: BLE_TX_CHARACTERISTIC_UUID,
-              properties: ['read', 'notify'],
-              permissions: ['readable'],
-            },
-          ],
-        });
+          ]);
+        }
 
-        // Start advertising with our service UUID and local name
+        // Start Advertising
         const localName = `${BLE_CONFIG.DEVICE_NAME_PREFIX}:${identity.displayName}`;
-        await this.peripheralManager.startAdvertising({
-          localName: localName.slice(0, 28), // BLE advertising name length limit
+        this.bluetoothModule.startAdvertising({
           serviceUUIDs: [BLE_SERVICE_UUID],
+          localName: localName.slice(0, 28),
         });
 
         this.isAdvertising = true;
-        logger.info('BLE', 'Advertising started');
+        logger.info('BLE', 'BLE advertising started');
       } else {
-        logger.warn('BLE', 'Peripheral manager not available — cannot advertise');
+        logger.warn('BLE', 'munim-bluetooth not loaded — advertising skipped');
       }
     } catch (error) {
       logger.error('BLE', 'Failed to start advertising', error);
@@ -181,11 +286,11 @@ export class BleTransportImpl implements Transport {
     if (!this.isAdvertising) return;
 
     try {
-      if (this.peripheralManager) {
-        await this.peripheralManager.stopAdvertising();
+      if (this.bluetoothModule?.stopAdvertising) {
+        this.bluetoothModule.stopAdvertising();
       }
       this.isAdvertising = false;
-      logger.info('BLE', 'Advertising stopped');
+      logger.info('BLE', 'BLE advertising stopped');
     } catch (error) {
       logger.error('BLE', 'Failed to stop advertising', error);
     }
@@ -198,38 +303,18 @@ export class BleTransportImpl implements Transport {
     }
 
     try {
-      logger.info('BLE', 'Starting BLE scan...');
+      logger.info('BLE', 'Starting BLE scan for ZenChat peers...');
 
-      if (this.bleManager) {
-        // Scan for our specific service UUID to filter non-app devices
-        await this.bleManager.startDeviceScan(
-          [BLE_SERVICE_UUID],
-          { allowDuplicates: true },
-          (error: any, device: any) => {
-            if (error) {
-              logger.error('DISCOVERY', 'Scan error', error);
-              return;
-            }
-
-            if (device) {
-              const peer: DiscoveredPeer = {
-                bleId: device.id,
-                name: this.parseDeviceName(device.localName || device.name),
-                rssi: device.rssi ?? -100,
-                lastSeenAt: Date.now(),
-                isAppPeer: true, // Filtered by service UUID
-              };
-
-              this.discoveredPeers.set(peer.bleId, peer);
-              this.peerEmitter.emit(peer);
-            }
-          },
-        );
+      if (this.bluetoothModule) {
+        this.bluetoothModule.startScan({
+          serviceUUIDs: [BLE_SERVICE_UUID],
+          allowDuplicates: true,
+        });
 
         this.isScanning = true;
-        logger.info('BLE', 'Scanning started');
+        logger.info('BLE', 'BLE scanning started');
       } else {
-        logger.warn('BLE', 'BLE manager not available — cannot scan');
+        logger.warn('BLE', 'munim-bluetooth not loaded — scanning skipped');
       }
     } catch (error) {
       logger.error('BLE', 'Failed to start scanning', error);
@@ -241,25 +326,23 @@ export class BleTransportImpl implements Transport {
     if (!this.isScanning) return;
 
     try {
-      if (this.bleManager) {
-        await this.bleManager.stopDeviceScan();
+      if (this.bluetoothModule?.stopScan) {
+        this.bluetoothModule.stopScan();
       }
       this.isScanning = false;
-      logger.info('BLE', 'Scanning stopped');
+      logger.info('BLE', 'BLE scanning stopped');
     } catch (error) {
       logger.error('BLE', 'Failed to stop scanning', error);
     }
   }
 
   async getDiscoveredPeers(): Promise<DiscoveredPeer[]> {
-    // Clean stale peers (not seen in last 30 seconds)
     const staleThreshold = Date.now() - 30000;
     for (const [id, peer] of this.discoveredPeers) {
       if (peer.lastSeenAt < staleThreshold) {
         this.discoveredPeers.delete(id);
       }
     }
-
     return Array.from(this.discoveredPeers.values());
   }
 
@@ -272,54 +355,25 @@ export class BleTransportImpl implements Transport {
         state: 'connecting',
       });
 
-      if (this.bleManager) {
-        const device = await this.bleManager.connectToDevice(peerId, {
-          timeout: 10000,
-        });
+      if (this.bluetoothModule) {
+        await this.bluetoothModule.connect(peerId);
 
-        // Discover services and characteristics
-        await device.discoverAllServicesAndCharacteristics();
+        // Discover services
+        await this.bluetoothModule.discoverServices(peerId);
 
-        // Set up notification subscription for receiving data
-        device.monitorCharacteristicForService(
+        // Subscribe to TX characteristic notifications
+        await this.bluetoothModule.subscribeToCharacteristic(
+          peerId,
           BLE_SERVICE_UUID,
           BLE_TX_CHARACTERISTIC_UUID,
-          (error: any, characteristic: any) => {
-            if (error) {
-              logger.error('CONNECTION', 'Notification error', error);
-              return;
-            }
-
-            if (characteristic?.value) {
-              // Decode base64 to Uint8Array
-              const decoded = this.base64ToUint8Array(characteristic.value);
-              for (const cb of this.dataCallbacks) {
-                try {
-                  cb(peerId, decoded);
-                } catch (e) {
-                  logger.error('BLE', 'Data callback error', e);
-                }
-              }
-            }
-          },
         );
-
-        // Monitor disconnection
-        device.onDisconnected((error: any, disconnectedDevice: any) => {
-          logger.info('CONNECTION', `Peer disconnected: ${peerId}`);
-          this.connectionEmitter.emit({
-            peerId,
-            state: 'disconnected',
-            error: error?.message,
-          });
-        });
 
         this.connectionEmitter.emit({
           peerId,
           state: 'connected',
         });
 
-        logger.info('CONNECTION', `Connected to peer: ${peerId}`);
+        logger.info('CONNECTION', `Successfully connected and subscribed to peer: ${peerId}`);
       }
     } catch (error) {
       logger.error('CONNECTION', `Failed to connect to peer: ${peerId}`, error);
@@ -341,8 +395,8 @@ export class BleTransportImpl implements Transport {
         state: 'disconnecting',
       });
 
-      if (this.bleManager) {
-        await this.bleManager.cancelDeviceConnection(peerId);
+      if (this.bluetoothModule?.disconnect) {
+        this.bluetoothModule.disconnect(peerId);
       }
 
       this.connectionEmitter.emit({
@@ -358,19 +412,22 @@ export class BleTransportImpl implements Transport {
 
   async send(peerId: string, data: Uint8Array): Promise<void> {
     try {
-      if (!this.bleManager) {
-        throw new Error('BLE manager not available');
+      if (!this.bluetoothModule) {
+        throw new Error('BLE module not available');
       }
 
-      // Encode to base64 for BLE characteristic write
-      const base64Data = this.uint8ArrayToBase64(data);
+      const hexValue = uint8ArrayToHex(data);
 
-      await this.bleManager.writeCharacteristicWithResponseForDevice(
+      // Write to the peer's RX characteristic
+      await this.bluetoothModule.writeCharacteristic(
         peerId,
         BLE_SERVICE_UUID,
         BLE_RX_CHARACTERISTIC_UUID,
-        base64Data,
+        hexValue,
+        'write',
       );
+
+      logger.debug('BLE', `Sent ${data.length} bytes to ${peerId}`);
     } catch (error) {
       logger.error('BLE', `Failed to send data to peer: ${peerId}`, error);
       throw error;
@@ -401,12 +458,13 @@ export class BleTransportImpl implements Transport {
       await this.stopScanning();
       await this.stopAdvertising();
 
-      if (this.bleManager) {
-        await this.bleManager.destroy();
-        this.bleManager = null;
+      for (const cleanup of this.cleanupFns) {
+        try {
+          cleanup();
+        } catch {}
       }
+      this.cleanupFns = [];
 
-      this.peripheralManager = null;
       this.discoveredPeers.clear();
       this.dataCallbacks.clear();
       this.stateEmitter.clear();
@@ -420,12 +478,6 @@ export class BleTransportImpl implements Transport {
     }
   }
 
-  // ─── Helpers ───────────────────────────────────────────────────
-
-  /**
-   * Parse the display name from a BLE device name.
-   * Our format: "ZenChat:DisplayName"
-   */
   private parseDeviceName(name: string | undefined | null): string | undefined {
     if (!name) return undefined;
     const prefix = `${BLE_CONFIG.DEVICE_NAME_PREFIX}:`;
@@ -434,31 +486,6 @@ export class BleTransportImpl implements Transport {
     }
     return name;
   }
-
-  /**
-   * Convert Uint8Array to base64 string.
-   */
-  private uint8ArrayToBase64(bytes: Uint8Array): string {
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-  }
-
-  /**
-   * Convert base64 string to Uint8Array.
-   */
-  private base64ToUint8Array(base64: string): Uint8Array {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes;
-  }
-
-  // ─── Status Getters ────────────────────────────────────────────
 
   get initialized(): boolean {
     return this.isInitialized;
