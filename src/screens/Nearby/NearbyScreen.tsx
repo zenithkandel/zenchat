@@ -141,7 +141,7 @@ export function NearbyScreen() {
               <Text style={[typo.caption1, { color: colors.textMuted, marginBottom: sp.sm, textTransform: 'uppercase', letterSpacing: 1 }]}>
                 Verified
               </Text>
-            ) : null
+            ) : undefined
           }
         />
       )}
