@@ -1,4 +1,33 @@
 {
   "name": "ZenChat",
-  "displayName": "ZenChat"
+  "displayName": "ZenChat",
+  "expo": {
+    "name": "ZenChat",
+    "slug": "zenchat",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.zenchat.app",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "ZenChat uses Bluetooth to discover and communicate with nearby devices completely offline.",
+        "NSBluetoothPeripheralUsageDescription": "ZenChat uses Bluetooth peripheral mode to advertise your identity to nearby trusted contacts.",
+        "NSCameraUsageDescription": "ZenChat uses the camera to scan contact identity QR codes."
+      }
+    },
+    "android": {
+      "package": "com.zenchat.app",
+      "permissions": [
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "BLUETOOTH_SCAN",
+        "BLUETOOTH_ADVERTISE",
+        "BLUETOOTH_CONNECT",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "CAMERA"
+      ]
+    }
+  }
 }
