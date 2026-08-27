@@ -27,6 +27,8 @@ import { ConnectionBadge } from '../../components/ConnectionBadge/ConnectionBadg
 import { Avatar } from '../../components/Avatar/Avatar';
 import type { RootStackParamList } from '../../app/navigation/RootNavigator';
 
+import { chatService } from '../../chat/chatService';
+
 type ChatRoute = RouteProp<RootStackParamList, 'Chat'>;
 
 const MAX_MESSAGE_LENGTH = 4096;
@@ -39,7 +41,7 @@ export function ChatScreen() {
   const insets = useSafeAreaInsets();
 
   const identity = useIdentityStore(s => s.identity);
-  const { getOrCreateConversation, addMessage, getMessages, markConversationRead } = useConversationStore();
+  const { getOrCreateConversation, getMessages, markConversationRead } = useConversationStore();
 
   const [text, setText] = useState('');
   const flatListRef = useRef<FlatList>(null);
@@ -47,31 +49,28 @@ export function ChatScreen() {
   const conversation = getOrCreateConversation(peerUserId, peerDisplayName);
   const messages = getMessages(conversation.id);
 
-  // Mark as read when opening
+  // Mark as read and ensure chat service is initialized
   useEffect(() => {
+    chatService.initialize();
     markConversationRead(conversation.id);
   }, [conversation.id, markConversationRead]);
 
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
     const trimmed = text.trim();
     if (!trimmed || !identity) return;
 
-    addMessage({
-      conversationId: conversation.id,
-      senderId: identity.userId,
-      receiverId: peerUserId,
-      text: trimmed,
-      status: 'pending',
-      packetId: undefined,
-    });
-
     setText('');
 
-    // Scroll to bottom
+    try {
+      await chatService.sendMessage(peerUserId, peerDisplayName, trimmed);
+    } catch {
+      // Message queue handles retry
+    }
+
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
-  }, [text, identity, conversation.id, peerUserId, addMessage]);
+  }, [text, identity, peerDisplayName, peerUserId]);
 
   const canSend = text.trim().length > 0 && text.length <= MAX_MESSAGE_LENGTH;
 
@@ -130,6 +129,7 @@ export function ChatScreen() {
             timestamp={item.timestamp}
             isSent={item.senderId === identity?.userId}
             status={item.status}
+            onRetry={() => chatService.retryMessage(item.id)}
           />
         )}
         ListEmptyComponent={
