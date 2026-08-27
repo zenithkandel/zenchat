@@ -109,7 +109,7 @@ export function PacketLabScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+      <StatusBar barStyle={colors.background === '#FAFAFA' || colors.background === '#FFFFFF' ? 'dark-content' : 'light-content'} />
 
       <ScrollView contentContainerStyle={{ paddingBottom: sp.massive }}>
         {/* Header */}

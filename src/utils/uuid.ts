@@ -11,9 +11,10 @@
  */
 export function generateUUID(): string {
   // Use crypto.getRandomValues if available (React Native/modern JS)
-  if (typeof globalThis.crypto !== 'undefined' && typeof globalThis.crypto.getRandomValues === 'function') {
+  const g = globalThis as any;
+  if (typeof g.crypto !== 'undefined' && typeof g.crypto.getRandomValues === 'function') {
     const bytes = new Uint8Array(16);
-    globalThis.crypto.getRandomValues(bytes);
+    g.crypto.getRandomValues(bytes);
 
     // Set version 4
     bytes[6] = (bytes[6] & 0x0f) | 0x40;

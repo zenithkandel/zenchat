@@ -21,10 +21,10 @@ import { useTheme } from '../../theme';
 import { useIdentityStore } from '../../state/stores/useIdentityStore';
 
 export function NameSetupScreen() {
-  const { colors, typography: typo, spacing: sp, radii } = useTheme();
+  const { colors, typography: typo, spacing: sp, radii, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const [name, setName] = useState('');
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<any>(null);
 
   const { createIdentity } = useIdentityStore();
 
@@ -40,7 +40,7 @@ export function NameSetupScreen() {
       style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
       <View style={[styles.content, { paddingTop: insets.top + sp.massive }]}>
         <Text style={[typo.title1, { color: colors.textPrimary }]}>

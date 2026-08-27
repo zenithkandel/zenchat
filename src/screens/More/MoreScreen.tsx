@@ -65,7 +65,7 @@ export function MoreScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+      <StatusBar barStyle={colors.background === '#FAFAFA' || colors.background === '#FFFFFF' ? 'dark-content' : 'light-content'} />
 
       <ScrollView contentContainerStyle={{ paddingTop: insets.top + sp.xxl, paddingBottom: sp.massive }}>
         <View style={{ paddingHorizontal: sp.xxl }}>

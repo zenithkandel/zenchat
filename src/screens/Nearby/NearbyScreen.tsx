@@ -85,8 +85,7 @@ export function NearbyScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar
-        barStyle={colors.background === '#FAFAFA' ? 'dark-content' : 'light-content'}
-        backgroundColor={colors.background}
+        barStyle={colors.background === '#FAFAFA' || colors.background === '#FFFFFF' ? 'dark-content' : 'light-content'}
       />
 
       <View style={[styles.header, { paddingTop: insets.top + sp.xxl, paddingHorizontal: sp.xxl }]}>

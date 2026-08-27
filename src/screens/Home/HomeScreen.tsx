@@ -75,7 +75,6 @@ export function HomeScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <StatusBar
         barStyle={colors.textPrimary === '#FFFFFF' || colors.textPrimary === '#F5F5F5' ? 'light-content' : 'dark-content'}
-        backgroundColor={colors.background}
       />
 
       <ScrollView

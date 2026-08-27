@@ -55,7 +55,7 @@ export function ChatsListScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+      <StatusBar barStyle={colors.background === '#FAFAFA' || colors.background === '#FFFFFF' ? 'dark-content' : 'light-content'} />
 
       <View style={[styles.header, { paddingTop: insets.top + sp.xxl, paddingHorizontal: sp.xxl }]}>
         <Text style={[typo.title1, { color: colors.textPrimary }]}>Chats</Text>

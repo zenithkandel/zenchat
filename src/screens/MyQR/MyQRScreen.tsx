@@ -48,7 +48,7 @@ export function MyQRScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
+      <StatusBar barStyle={colors.background === '#FAFAFA' || colors.background === '#FFFFFF' ? 'dark-content' : 'light-content'} />
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + sp.lg }]}>
