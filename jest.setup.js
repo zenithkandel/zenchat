@@ -1,4 +1,5 @@
 // Jest setup file for React Native modules
+
 jest.mock('react-native-gesture-handler', () => {
   const View = require('react-native').View;
   return {
@@ -21,7 +22,6 @@ jest.mock('react-native-gesture-handler', () => {
     PanGestureHandler: View,
     PinchGestureHandler: View,
     RotationGestureHandler: View,
-    /* RNRootView */
     GestureHandlerRootView: View,
     Directions: {},
   };
@@ -34,12 +34,18 @@ jest.mock('react-native-reanimated', () => {
 });
 
 jest.mock('react-native-safe-area-context', () => {
+  const React = require('react');
   const inset = { top: 0, right: 0, bottom: 0, left: 0 };
+  const frame = { x: 0, y: 0, width: 390, height: 844 };
+  const InsetsContext = React.createContext(inset);
+  const FrameContext = React.createContext(frame);
   return {
-    SafeAreaProvider: ({ children }: any) => children,
+    SafeAreaProvider: ({ children }: any) => React.createElement(InsetsContext.Provider, { value: inset }, children),
     SafeAreaConsumer: ({ children }: any) => children(inset),
+    SafeAreaInsetsContext: InsetsContext,
+    SafeAreaFrameContext: FrameContext,
     useSafeAreaInsets: () => inset,
-    useSafeAreaFrame: () => ({ x: 0, y: 0, width: 390, height: 844 }),
+    useSafeAreaFrame: () => frame,
   };
 });
 
