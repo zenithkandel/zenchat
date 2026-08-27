@@ -247,17 +247,16 @@ export class BleTransportImpl implements Transport {
           this.bluetoothModule.setServices([
             {
               uuid: BLE_SERVICE_UUID,
-              primary: true,
               characteristics: [
                 {
                   uuid: BLE_RX_CHARACTERISTIC_UUID,
                   properties: ['write', 'writeWithoutResponse'],
-                  permissions: ['writeable'],
+                  permissions: ['write'],
                 },
                 {
                   uuid: BLE_TX_CHARACTERISTIC_UUID,
                   properties: ['read', 'notify'],
-                  permissions: ['readable'],
+                  permissions: ['read'],
                 },
               ],
             },
