@@ -27,6 +27,8 @@ import { SettingsScreen } from '../../screens/Settings/SettingsScreen';
 import { MyQRScreen } from '../../screens/MyQR/MyQRScreen';
 import { DiagnosticsScreen } from '../../screens/Diagnostics/DiagnosticsScreen';
 import { PacketLabScreen } from '../../screens/PacketLab/PacketLabScreen';
+import { ScanQRScreen } from '../../screens/ScanQR/ScanQRScreen';
+import { ContactDetailsScreen } from '../../screens/ContactDetails/ContactDetailsScreen';
 
 // ─── Navigation Types ──────────────────────────────────────────────
 
@@ -34,8 +36,10 @@ export type RootStackParamList = {
   Onboarding: undefined;
   MainTabs: undefined;
   Chat: { peerUserId: string; peerDisplayName: string };
+  ContactDetails: { userId: string };
   Settings: undefined;
   MyQR: undefined;
+  ScanQR: undefined;
   Diagnostics: undefined;
   PacketLab: undefined;
 };
@@ -222,6 +226,20 @@ export function RootNavigator() {
               component={MyQRScreen}
               options={{
                 presentation: 'modal',
+              }}
+            />
+            <RootStack.Screen
+              name="ScanQR"
+              component={ScanQRScreen}
+              options={{
+                presentation: 'modal',
+              }}
+            />
+            <RootStack.Screen
+              name="ContactDetails"
+              component={ContactDetailsScreen}
+              options={{
+                animation: 'slide_from_right',
               }}
             />
             <RootStack.Screen
