@@ -1,45 +1,50 @@
 /**
- * Sample React Native App
- * https://github.com/facebook/react-native
+ * ZenChat — App Entry Point
  *
- * @format
+ * Root component that sets up:
+ * - Theme provider (dark/light mode)
+ * - Safe area provider
+ * - Navigation
+ * - Identity loading
+ * - BLE initialization
  */
 
-import { NewAppScreen } from '@react-native/new-app-screen';
-import { StatusBar, StyleSheet, useColorScheme, View } from 'react-native';
-import {
-  SafeAreaProvider,
-  useSafeAreaInsets,
-} from 'react-native-safe-area-context';
+import React, { useEffect } from 'react';
+import { StatusBar, LogBox } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { ThemeProvider } from './src/theme';
+import { RootNavigator } from './src/app/navigation/RootNavigator';
+import { useIdentityStore } from './src/state/stores/useIdentityStore';
+import { logger } from './src/utils/logger';
 
-function App() {
-  const isDarkMode = useColorScheme() === 'dark';
-
-  return (
-    <SafeAreaProvider>
-      <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-      <AppContent />
-    </SafeAreaProvider>
-  );
+// Suppress known non-critical warnings in dev
+if (__DEV__) {
+  LogBox.ignoreLogs([
+    'Non-serializable values were found in the navigation state',
+  ]);
 }
 
 function AppContent() {
-  const safeAreaInsets = useSafeAreaInsets();
+  const loadIdentity = useIdentityStore(s => s.loadIdentity);
 
-  return (
-    <View style={styles.container}>
-      <NewAppScreen
-        templateFileName="App.tsx"
-        safeAreaInsets={safeAreaInsets}
-      />
-    </View>
-  );
+  useEffect(() => {
+    logger.info('APP', 'ZenChat starting...');
+    loadIdentity();
+    logger.info('APP', 'Identity loaded');
+  }, [loadIdentity]);
+
+  return <RootNavigator />;
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-});
-
-export default App;
+export default function App() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <AppContent />
+        </ThemeProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  );
+}
