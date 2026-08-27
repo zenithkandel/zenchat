@@ -18,12 +18,20 @@ export interface IdentityKeyPair {
   createdAt: number;
 }
 
+function stringToBytes(str: string): Uint8Array {
+  const bytes = new Uint8Array(str.length);
+  for (let i = 0; i < str.length; i++) {
+    bytes[i] = str.charCodeAt(i) & 0xff;
+  }
+  return bytes;
+}
+
 /**
  * Standard SHA-256 implementation in pure TypeScript for deterministic offline hashing.
  */
 export function sha256(input: Uint8Array | string): Uint8Array {
   const bytes = typeof input === 'string'
-    ? new TextEncoder().encode(input)
+    ? stringToBytes(input)
     : input;
 
   function rightRotate(value: number, amount: number): number {
@@ -157,7 +165,7 @@ export class CryptoService {
    * Sign arbitrary data with local private key.
    */
   async sign(data: string | Uint8Array, privateKey: string): Promise<string> {
-    const dataBytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+    const dataBytes = typeof data === 'string' ? stringToBytes(data) : data;
     const combined = new Uint8Array(dataBytes.length + 32);
     combined.set(dataBytes, 0);
 

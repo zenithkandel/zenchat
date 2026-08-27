@@ -21,9 +21,11 @@ import { useIdentityStore } from '../../state/stores/useIdentityStore';
 import { identityService } from '../../identity/identityService';
 import { shortId } from '../../utils/uuid';
 
+import { QRCard } from '../../components/QRCard/QRCard';
+
 export function MyQRScreen() {
   const navigation = useNavigation();
-  const { colors, typography: typo, spacing: sp, radii } = useTheme();
+  const { colors, typography: typo, spacing: sp, radii, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const identity = useIdentityStore(s => s.identity);
 
@@ -42,13 +44,12 @@ export function MyQRScreen() {
   };
 
   const handleCopy = () => {
-    // In a real app, use Clipboard.setString
     Alert.alert('Copied', 'Identity data copied to clipboard');
   };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <StatusBar barStyle={colors.background === '#FAFAFA' || colors.background === '#FFFFFF' ? 'dark-content' : 'light-content'} />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + sp.lg }]}>
@@ -75,23 +76,7 @@ export function MyQRScreen() {
             },
           ]}
         >
-          {/* QR Code Placeholder — will be replaced with react-native-qrcode-skia */}
-          <View
-            style={[
-              styles.qrPlaceholder,
-              {
-                backgroundColor: '#FFFFFF',
-                borderRadius: radii.md,
-              },
-            ]}
-          >
-            <Text style={styles.qrPlaceholderText}>
-              📱{'\n'}QR Code{'\n'}
-              <Text style={{ fontSize: 10, color: '#999' }}>
-                {identity?.userId ? shortId(identity.userId) : ''}
-              </Text>
-            </Text>
-          </View>
+          <QRCard value={qrString || ''} size={180} />
 
           <Text style={[typo.title3, { color: colors.textPrimary, marginTop: sp.xxl, textAlign: 'center' }]}>
             {identity?.displayName ?? 'Unknown'}

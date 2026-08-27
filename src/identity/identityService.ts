@@ -76,7 +76,7 @@ const PROTOCOL_VERSION = 1;
 
 // ─── Identity Service ──────────────────────────────────────────────
 
-class IdentityService {
+export class IdentityService {
   private storage: KVStorage;
   private cachedIdentity: LocalIdentity | null = null;
 

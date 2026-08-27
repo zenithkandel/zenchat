@@ -111,6 +111,7 @@ export function MoreScreen() {
           </Text>
           <View style={[styles.menuGroup, { backgroundColor: colors.surface, borderColor: colors.border, borderRadius: radii.md }]}>
             <MenuItem icon="📱" label="My QR Code" subtitle="Share your identity" onPress={() => navigation.navigate('MyQR')} colors={colors} />
+            <MenuItem icon="📷" label="Scan QR Code" subtitle="Identify and verify nearby contacts" onPress={() => navigation.navigate('ScanQR')} colors={colors} />
           </View>
         </View>
 
