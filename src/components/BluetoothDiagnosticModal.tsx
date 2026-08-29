@@ -32,7 +32,7 @@ export const BluetoothDiagnosticModal: React.FC<BluetoothDiagnosticModalProps> =
   onRefreshPermissions,
 }) => {
   const { identity } = useIdentity();
-  const { isMock, status, toggleTransportMode } = useTransport();
+  const { isMock, status, toggleTransportMode, debugLogs } = useTransport();
 
   if (!visible) return null;
 
@@ -138,6 +138,26 @@ export const BluetoothDiagnosticModal: React.FC<BluetoothDiagnosticModalProps> =
                 <View style={styles.metaRow}>
                   <Text style={styles.metaLabel}>Service UUID:</Text>
                   <Text style={styles.metaValueSmall}>0000FE60-0000-1000-8000-00805F9B34FB</Text>
+                </View>
+              </View>
+
+              {/* Real-Time Bluetooth Hardware Console Logs */}
+              <View style={styles.section}>
+                <Text style={[typography.label, styles.sectionHeader]}>LIVE BLUETOOTH CONSOLE LOGS</Text>
+                <View style={styles.logBox}>
+                  {debugLogs && debugLogs.length > 0 ? (
+                    debugLogs.map((logItem, idx) => (
+                      <Text key={idx} style={styles.logLine}>
+                        {logItem}
+                      </Text>
+                    ))
+                  ) : (
+                    <Text style={styles.logLineMuted}>
+                      {isMock
+                        ? 'Logs are available in Real BLE mode.'
+                        : 'Waiting for Bluetooth events... Scanning/Advertising active.'}
+                    </Text>
+                  )}
                 </View>
               </View>
 
@@ -317,8 +337,28 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.black,
   },
+  logBox: {
+    backgroundColor: colors.darkGray,
+    borderWidth: borders.thin,
+    borderColor: colors.black,
+    borderRadius: borders.radius.sm,
+    padding: 10,
+    minHeight: 120,
+    maxHeight: 180,
+  },
+  logLine: {
+    fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: '#00FF66',
+    marginBottom: 4,
+  },
+  logLineMuted: {
+    fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: colors.mutedText,
+  },
   actionSection: {
-    marginTop: 8,
+    marginTop: 12,
     gap: 4,
   },
   actionBtn: {

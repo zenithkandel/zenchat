@@ -92,13 +92,18 @@ export const TransportProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setIncomingMessage(packet);
     });
 
+    const unsubscribeLogs = realTransport.onLogsChanged((logs) => {
+      setDebugLogs([...logs]);
+    });
+
     return () => {
       unsubscribePeers();
       unsubscribeStatus();
       unsubscribeMessage();
+      unsubscribeLogs();
       activeTransport.stop().catch(() => {});
     };
-  }, [identity, activeTransport, isMock]);
+  }, [identity, activeTransport, isMock, realTransport]);
 
   const refreshPeers = useCallback(async () => {
     try {
@@ -160,6 +165,7 @@ export const TransportProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         isMock,
         incomingMessage,
         diagnostic,
+        debugLogs,
         refreshPermissions,
         dismissIncomingMessage,
         refreshPeers,
