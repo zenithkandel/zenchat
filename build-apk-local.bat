@@ -16,9 +16,6 @@ echo [1/6] Checking Node.js and npm...
 where node >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Node.js is not found!
-    echo Downloading and installing Node.js via winget...
-    winget install OpenJS.NodeJS.LTS -e --accept-package-agreements --accept-source-agreements
-    echo Please restart this script after Node.js installation completes.
     pause
     exit /b 1
 )
@@ -27,24 +24,33 @@ echo [OK] Node.js is ready.
 echo.
 
 :: ------------------------------------------------------------
-:: STEP 2: CHECK JAVA JDK
+:: STEP 2: CONFIGURE COMPATIBLE JAVA JDK (JDK 17/21)
 :: ------------------------------------------------------------
-echo [2/6] Checking Java Development Kit (JDK)...
-where java >nul 2>&1
-if %ERRORLEVEL% neq 0 (
-    echo [!] Java JDK not detected in PATH.
-    echo Installing OpenJDK 17 LTS automatically via winget...
-    winget install Microsoft.OpenJDK.17 -e --accept-package-agreements --accept-source-agreements
+echo [2/6] Configuring Android-compatible Java JDK...
+
+:: Prioritize Android Studio's bundled JDK 21/17 (jbr)
+if exist "C:\Program Files\Android\Android Studio\jbr" (
+    set "JAVA_HOME=C:\Program Files\Android\Android Studio\jbr"
+    echo [OK] Using Android Studio JDK at C:\Program Files\Android\Android Studio\jbr
+) else if exist "C:\Program Files\Microsoft\jdk-17" (
     set "JAVA_HOME=C:\Program Files\Microsoft\jdk-17"
-    set "PATH=!JAVA_HOME!\bin;%PATH%"
+    echo [OK] Using Microsoft JDK 17
+) else if exist "C:\Program Files\Eclipse Adoptium\jdk-17" (
+    set "JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-17"
+    echo [OK] Using Temurin JDK 17
 ) else (
-    java -version
-    echo [OK] Java is ready.
+    echo [INFO] Using system default Java
 )
+
+if defined JAVA_HOME (
+    set "PATH=%JAVA_HOME%\bin;%PATH%"
+)
+
+java -version
 echo.
 
 :: ------------------------------------------------------------
-:: STEP 3: CHECK ANDROID SDK
+:: STEP 3: CONFIGURE ANDROID SDK
 :: ------------------------------------------------------------
 echo [3/6] Checking Android SDK...
 if not defined ANDROID_HOME (
@@ -55,11 +61,7 @@ if not defined ANDROID_HOME (
         set "ANDROID_HOME=C:\Android\sdk"
         echo [INFO] Located Android SDK at C:\Android\sdk
     ) else (
-        echo [!] Android SDK not found on your system.
-        echo Installing Android Studio and SDK via winget...
-        winget install Google.AndroidStudio -e --accept-package-agreements --accept-source-agreements
-        set "ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk"
-        echo Android Studio has been installed. Please open Android Studio once to complete SDK component setup if needed.
+        echo [!] Android SDK not found in default paths.
     )
 )
 
@@ -69,24 +71,24 @@ set "PATH=%ANDROID_HOME%\platform-tools;%ANDROID_HOME%\cmdline-tools\latest\bin;
 echo.
 
 :: ------------------------------------------------------------
-:: STEP 4: GENERATE NATIVE ANDROID PROJECT (EXPO PREBUILD)
+:: STEP 4: GENERATE / VERIFY NATIVE ANDROID PROJECT
 :: ------------------------------------------------------------
-echo [4/6] Generating native Android files (Expo Prebuild)...
-call npx expo prebuild --platform android --clean
-if %ERRORLEVEL% neq 0 (
-    echo [!] Expo prebuild returned code %ERRORLEVEL%, checking android folder...
+echo [4/6] Verifying native Android project...
+if not exist "android" (
+    echo Generating native Android files via Expo Prebuild...
+    call npx expo prebuild --platform android --clean
 )
 
 if not exist "android" (
-    echo [ERROR] Native android directory was not created.
+    echo [ERROR] Native android directory could not be created.
     pause
     exit /b 1
 )
 
-:: Create android/local.properties with proper escaped sdk.dir path
+:: Ensure android/local.properties points to the correct SDK path
 set "ESCAPED_SDK=%ANDROID_HOME:\=\\%"
 echo sdk.dir=%ESCAPED_SDK% > android\local.properties
-echo [OK] Created android\local.properties with sdk.dir
+echo [OK] Updated android\local.properties
 echo.
 
 :: ------------------------------------------------------------
@@ -100,7 +102,7 @@ call gradlew.bat assembleRelease
 
 if %ERRORLEVEL% neq 0 (
     echo.
-    echo [INFO] assembleRelease requires release keystore. Falling back to assembleDebug...
+    echo [INFO] assembleRelease requires signing key. Building standalone Debug APK...
     call gradlew.bat assembleDebug
 )
 
