@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -17,10 +17,12 @@ import { StatusIndicator } from '../components/StatusIndicator';
 import { PeerCard } from '../components/PeerCard';
 import { BrutalistButton } from '../components/BrutalistButton';
 import { BrutalistCard } from '../components/BrutalistCard';
+import { BluetoothDiagnosticModal } from '../components/BluetoothDiagnosticModal';
 import { useIdentity } from '../identity/IdentityContext';
 import { useTransport } from '../transport/TransportContext';
+import { BluetoothPermissions } from '../transport/BluetoothPermissions';
 import { Peer } from '../transport/MessageTransport';
-import { Users, AlertTriangle } from 'lucide-react-native';
+import { Users, AlertTriangle, ShieldAlert, Settings } from 'lucide-react-native';
 
 interface NearbyScreenProps {
   onSelectPeer: (peer: Peer) => void;
@@ -35,10 +37,14 @@ export const NearbyScreen: React.FC<NearbyScreenProps> = ({
     peers,
     status,
     isMock,
+    diagnostic,
+    refreshPermissions,
     refreshPeers,
     toggleTransportMode,
     simulateIncomingMessage,
   } = useTransport();
+
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   const handleOpenSettings = () => {
     if (Platform.OS === 'ios') {
@@ -50,8 +56,15 @@ export const NearbyScreen: React.FC<NearbyScreenProps> = ({
     }
   };
 
+  const handleRequestPermission = async () => {
+    await BluetoothPermissions.requestPermissions();
+    await refreshPermissions();
+    await refreshPeers();
+  };
+
   const isBluetoothOff = status === 'bluetooth_off';
   const isSearching = status === 'searching';
+  const hasPermissionError = diagnostic && !diagnostic.isGranted && !isMock;
   const peerCount = peers.length;
 
   return (
@@ -73,12 +86,14 @@ export const NearbyScreen: React.FC<NearbyScreenProps> = ({
           }
         />
 
-        {/* Transport & Bluetooth Status */}
+        {/* Transport & Bluetooth Status Indicator (Tappable for Diagnostics) */}
         <StatusIndicator
           status={status}
           isMock={isMock}
           onToggleMock={toggleTransportMode}
           onSimulateIncoming={() => simulateIncomingMessage('Jordan', 'Hey! You there? 👋')}
+          onOpenDiagnostics={() => setShowDiagnostics(true)}
+          errorMessage={diagnostic?.errorMessage}
         />
 
         <ScrollView
@@ -93,6 +108,38 @@ export const NearbyScreen: React.FC<NearbyScreenProps> = ({
           }
           showsVerticalScrollIndicator={false}
         >
+          {/* Permission Issue Warning Banner */}
+          {hasPermissionError && (
+            <BrutalistCard style={styles.permissionCard} shadowOffset={4}>
+              <View style={styles.permissionHeader}>
+                <ShieldAlert size={24} color={colors.black} strokeWidth={2.5} />
+                <Text style={[typography.title, styles.permissionTitle]}>
+                  PERMISSIONS REQUIRED
+                </Text>
+              </View>
+              <Text style={[typography.body, styles.permissionBody]}>
+                {diagnostic?.errorMessage ||
+                  'Android requires "Nearby devices" permission to discover nearby ZenChat users via Bluetooth.'}
+              </Text>
+              <View style={styles.permissionBtnRow}>
+                <BrutalistButton
+                  title="GRANT PERMISSION"
+                  onPress={handleRequestPermission}
+                  variant="primary"
+                  style={styles.halfBtn}
+                  shadowOffset={3}
+                />
+                <BrutalistButton
+                  title="SETTINGS"
+                  onPress={handleOpenSettings}
+                  variant="secondary"
+                  style={styles.halfBtn}
+                  shadowOffset={3}
+                />
+              </View>
+            </BrutalistCard>
+          )}
+
           {isBluetoothOff ? (
             /* Bluetooth Off State */
             <BrutalistCard style={styles.stateCard} shadowOffset={5}>
@@ -118,7 +165,9 @@ export const NearbyScreen: React.FC<NearbyScreenProps> = ({
               </View>
               <Text style={[typography.title, styles.stateTitle]}>NOBODY NEARBY</Text>
               <Text style={[typography.body, styles.stateBody]}>
-                ZenChat users will appear here when they are close enough to connect.
+                {isMock
+                  ? 'Tap "SCAN AGAIN" or toggle mode to test simulated peers.'
+                  : 'ZenChat devices will appear here when they are within Bluetooth range (~10-30 meters) with the app open.'}
               </Text>
               <BrutalistButton
                 title={isSearching ? 'SCANNING...' : 'SCAN AGAIN'}
@@ -126,6 +175,13 @@ export const NearbyScreen: React.FC<NearbyScreenProps> = ({
                 loading={isSearching}
                 variant="primary"
                 style={styles.stateButton}
+              />
+              <BrutalistButton
+                title="CHECK BLUETOOTH STATUS"
+                onPress={() => setShowDiagnostics(true)}
+                variant="secondary"
+                style={styles.stateButton}
+                shadowOffset={3}
               />
             </BrutalistCard>
           ) : (
@@ -148,6 +204,14 @@ export const NearbyScreen: React.FC<NearbyScreenProps> = ({
             </View>
           )}
         </ScrollView>
+
+        {/* Full Bluetooth Diagnostic Inspector Modal */}
+        <BluetoothDiagnosticModal
+          visible={showDiagnostics}
+          onClose={() => setShowDiagnostics(false)}
+          diagnostic={diagnostic}
+          onRefreshPermissions={refreshPermissions}
+        />
       </View>
     </SafeAreaView>
   );
@@ -183,8 +247,36 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingTop: 12,
+    paddingTop: 8,
     paddingBottom: 32,
+  },
+  permissionCard: {
+    backgroundColor: colors.white,
+    marginBottom: 12,
+    padding: 16,
+  },
+  permissionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 6,
+  },
+  permissionTitle: {
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  permissionBody: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  permissionBtnRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  halfBtn: {
+    flex: 1,
+    marginVertical: 0,
   },
   listContainer: {
     marginTop: 4,
@@ -205,20 +297,20 @@ const styles = StyleSheet.create({
   },
   stateCard: {
     alignItems: 'center',
-    paddingVertical: 32,
+    paddingVertical: 28,
     paddingHorizontal: 20,
-    marginTop: 20,
+    marginTop: 16,
   },
   iconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     backgroundColor: colors.lightGray,
     borderWidth: borders.thin,
     borderColor: colors.black,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
   },
   stateTitle: {
     textAlign: 'center',
@@ -228,10 +320,11 @@ const styles = StyleSheet.create({
   stateBody: {
     textAlign: 'center',
     color: colors.black,
-    marginBottom: 20,
+    marginBottom: 18,
     lineHeight: 20,
   },
   stateButton: {
     width: '100%',
+    marginVertical: 4,
   },
 });
