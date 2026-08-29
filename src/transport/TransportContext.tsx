@@ -1,9 +1,11 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { MessageTransport, Peer, TransportStatus } from './MessageTransport';
 import { MockTransport } from './MockTransport';
 import { RealBleTransport } from './RealBleTransport';
 import { MessagePacket } from '../protocol/MessagePacket';
 import { useIdentity } from '../identity/IdentityContext';
+import { BluetoothPermissions, BluetoothDiagnostic } from './BluetoothPermissions';
 
 type TransportContextType = {
   transport: MessageTransport;
@@ -11,6 +13,8 @@ type TransportContextType = {
   status: TransportStatus;
   isMock: boolean;
   incomingMessage: MessagePacket | null;
+  diagnostic: BluetoothDiagnostic | null;
+  refreshPermissions: () => Promise<void>;
   dismissIncomingMessage: () => void;
   refreshPeers: () => Promise<void>;
   sendMessage: (peerId: string, text: string) => Promise<void>;
@@ -23,18 +27,52 @@ const TransportContext = createContext<TransportContextType | null>(null);
 
 export const TransportProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { identity } = useIdentity();
-  const [isMock, setIsMock] = useState<boolean>(true); // Defaults to Mock for Expo Go
+  
+  // In Standalone APK builds, default directly to RealBleTransport!
+  // In Expo Go, default to MockTransport so that UI simulation works immediately.
+  const isExpoGo =
+    Constants.executionEnvironment === ExecutionEnvironment.StoreClient ||
+    (Constants as any).appOwnership === 'expo';
+
+  const [isMock, setIsMock] = useState<boolean>(isExpoGo);
   const [peers, setPeers] = useState<Peer[]>([]);
   const [status, setStatus] = useState<TransportStatus>('ready');
   const [incomingMessage, setIncomingMessage] = useState<MessagePacket | null>(null);
+  const [diagnostic, setDiagnostic] = useState<BluetoothDiagnostic | null>(null);
 
   const mockTransport = useMemo(() => new MockTransport(), []);
   const realTransport = useMemo(() => new RealBleTransport(), []);
 
   const activeTransport: MessageTransport = isMock ? mockTransport : realTransport;
 
+  const refreshPermissions = useCallback(async () => {
+    try {
+      const diag = await BluetoothPermissions.checkPermissions();
+      setDiagnostic(diag);
+      if (!diag.isGranted && !isMock) {
+        setStatus('error');
+      }
+    } catch {
+      // Ignore
+    }
+  }, [isMock]);
+
+  useEffect(() => {
+    refreshPermissions();
+  }, [refreshPermissions]);
+
   useEffect(() => {
     if (!identity) return;
+
+    // When in Real BLE mode, request permissions on start
+    if (!isMock) {
+      BluetoothPermissions.requestPermissions().then((diag) => {
+        setDiagnostic(diag);
+        if (!diag.isGranted) {
+          setStatus('error');
+        }
+      });
+    }
 
     activeTransport.start(identity).catch((err) => {
       console.warn('Transport start notice:', err);
@@ -58,15 +96,27 @@ export const TransportProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       unsubscribeMessage();
       activeTransport.stop().catch(() => {});
     };
-  }, [identity, activeTransport]);
+  }, [identity, activeTransport, isMock]);
 
   const refreshPeers = useCallback(async () => {
     try {
+      if (!isMock) {
+        const diag = await BluetoothPermissions.checkPermissions();
+        setDiagnostic(diag);
+        if (!diag.isGranted) {
+          const req = await BluetoothPermissions.requestPermissions();
+          setDiagnostic(req);
+          if (!req.isGranted) {
+            setStatus('error');
+            return;
+          }
+        }
+      }
       await activeTransport.discoverPeers();
     } catch (err) {
       console.error('Refresh peers failed:', err);
     }
-  }, [activeTransport]);
+  }, [activeTransport, isMock]);
 
   const connect = useCallback(
     async (peerId: string) => {
@@ -107,6 +157,8 @@ export const TransportProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         status,
         isMock,
         incomingMessage,
+        diagnostic,
+        refreshPermissions,
         dismissIncomingMessage,
         refreshPeers,
         sendMessage,

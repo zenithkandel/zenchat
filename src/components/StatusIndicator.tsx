@@ -4,12 +4,15 @@ import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
 import { borders } from '../theme/borders';
 import { TransportStatus } from '../transport/MessageTransport';
+import { Info } from 'lucide-react-native';
 
 interface StatusIndicatorProps {
   status: TransportStatus;
   isMock: boolean;
   onToggleMock?: () => void;
   onSimulateIncoming?: () => void;
+  onOpenDiagnostics?: () => void;
+  errorMessage?: string | null;
 }
 
 export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
@@ -17,6 +20,8 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
   isMock,
   onToggleMock,
   onSimulateIncoming,
+  onOpenDiagnostics,
+  errorMessage,
 }) => {
   const getStatusDisplay = () => {
     switch (status) {
@@ -40,14 +45,14 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
         };
       case 'error':
         return {
-          text: 'CONNECTION ISSUE',
+          text: 'BLE ISSUE',
           dotActive: false,
           accessibility: 'Transport connection issue.',
         };
       case 'ready':
       default:
         return {
-          text: 'READY',
+          text: isMock ? 'READY (MOCK)' : 'READY (BLE)',
           dotActive: true,
           accessibility: 'Ready to discover and send.',
         };
@@ -58,12 +63,13 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Human-Readable Status Badge */}
-      <View
+      {/* Human-Readable Status Badge - Tappable for Diagnostics */}
+      <Pressable
+        onPress={onOpenDiagnostics}
         style={styles.statusBadge}
         accessible={true}
-        accessibilityRole="text"
-        accessibilityLabel={current.accessibility}
+        accessibilityRole="button"
+        accessibilityLabel={`${current.accessibility}. Tap for Bluetooth diagnostics.`}
       >
         <View
           style={[
@@ -72,32 +78,42 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
           ]}
         />
         <Text style={[typography.tag, styles.statusText]}>{current.text}</Text>
-      </View>
+        <Info size={12} color={colors.black} strokeWidth={2.5} style={styles.infoIcon} />
+      </Pressable>
 
-      {/* Development Indicator for Expo Go */}
-      {isMock && (
-        <View style={styles.devContainer}>
+      {/* Development Indicator */}
+      <View style={styles.devContainer}>
+        {isMock ? (
           <Pressable
             onPress={onToggleMock}
             accessibilityRole="button"
             accessibilityLabel="Switch to hardware BLE"
             style={styles.demoBadge}
           >
-            <Text style={styles.demoText}>DEMO MODE</Text>
+            <Text style={styles.demoText}>MOCK</Text>
           </Pressable>
+        ) : (
+          <Pressable
+            onPress={onToggleMock}
+            accessibilityRole="button"
+            accessibilityLabel="Switch to Mock Simulator"
+            style={styles.realBleBadge}
+          >
+            <Text style={styles.realBleText}>REAL BLE</Text>
+          </Pressable>
+        )}
 
-          {onSimulateIncoming && (
-            <Pressable
-              onPress={onSimulateIncoming}
-              accessibilityRole="button"
-              accessibilityLabel="Simulate test message arrival"
-              style={styles.testMsgBadge}
-            >
-              <Text style={styles.testMsgText}>+ TEST MSG</Text>
-            </Pressable>
-          )}
-        </View>
-      )}
+        {isMock && onSimulateIncoming && (
+          <Pressable
+            onPress={onSimulateIncoming}
+            accessibilityRole="button"
+            accessibilityLabel="Simulate test message arrival"
+            style={styles.testMsgBadge}
+          >
+            <Text style={styles.testMsgText}>+ TEST</Text>
+          </Pressable>
+        )}
+      </View>
     </View>
   );
 };
@@ -138,6 +154,9 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: colors.black,
   },
+  infoIcon: {
+    marginLeft: 5,
+  },
   devContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -155,6 +174,20 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '900',
     color: colors.black,
+    letterSpacing: 0.5,
+  },
+  realBleBadge: {
+    backgroundColor: colors.black,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: borders.radius.sm,
+    borderWidth: 1.5,
+    borderColor: colors.black,
+  },
+  realBleText: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: colors.white,
     letterSpacing: 0.5,
   },
   testMsgBadge: {
