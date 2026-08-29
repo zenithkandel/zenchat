@@ -28,7 +28,6 @@ echo.
 :: ------------------------------------------------------------
 echo [2/6] Configuring Android-compatible Java JDK...
 
-:: Prioritize Android Studio's bundled JDK 21/17 (jbr)
 if exist "C:\Program Files\Android\Android Studio\jbr" (
     set "JAVA_HOME=C:\Program Files\Android\Android Studio\jbr"
     echo [OK] Using Android Studio JDK at C:\Program Files\Android\Android Studio\jbr
@@ -50,9 +49,9 @@ java -version
 echo.
 
 :: ------------------------------------------------------------
-:: STEP 3: CONFIGURE ANDROID SDK
+:: STEP 3: CONFIGURE ANDROID SDK & NDK
 :: ------------------------------------------------------------
-echo [3/6] Checking Android SDK...
+echo [3/6] Checking Android SDK and NDK...
 if not defined ANDROID_HOME (
     if exist "%LOCALAPPDATA%\Android\Sdk" (
         set "ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk"
@@ -60,14 +59,26 @@ if not defined ANDROID_HOME (
     ) else if exist "C:\Android\sdk" (
         set "ANDROID_HOME=C:\Android\sdk"
         echo [INFO] Located Android SDK at C:\Android\sdk
-    ) else (
-        echo [!] Android SDK not found in default paths.
     )
 )
 
 echo ANDROID_HOME is set to: %ANDROID_HOME%
 set "ANDROID_SDK_ROOT=%ANDROID_HOME%"
 set "PATH=%ANDROID_HOME%\platform-tools;%ANDROID_HOME%\cmdline-tools\latest\bin;%PATH%"
+
+:: Check NDK directory
+set "NDK_DIR="
+if exist "%ANDROID_HOME%\ndk\27.1.12297006" (
+    set "NDK_DIR=%ANDROID_HOME%\ndk\27.1.12297006"
+    set "ANDROID_NDK_HOME=%ANDROID_HOME%\ndk\27.1.12297006"
+    echo [INFO] Located NDK 27.1 at !NDK_DIR!
+) else if exist "%ANDROID_HOME%\ndk" (
+    for /d %%D in ("%ANDROID_HOME%\ndk\*") do (
+        set "NDK_DIR=%%~fD"
+        set "ANDROID_NDK_HOME=%%~fD"
+    )
+    echo [INFO] Located NDK at !NDK_DIR!
+)
 echo.
 
 :: ------------------------------------------------------------
@@ -85,10 +96,17 @@ if not exist "android" (
     exit /b 1
 )
 
-:: Ensure android/local.properties points to the correct SDK path
-set "ESCAPED_SDK=%ANDROID_HOME:\=\\%"
-echo sdk.dir=%ESCAPED_SDK% > android\local.properties
-echo [OK] Updated android\local.properties
+:: Create android/local.properties with forward slashes
+set "FWD_SDK=%ANDROID_HOME:\=/%"
+echo sdk.dir=%FWD_SDK%> android\local.properties
+
+if defined NDK_DIR (
+    set "FWD_NDK=%NDK_DIR:\=/%"
+    echo ndk.dir=!FWD_NDK!>> android\local.properties
+)
+
+echo [OK] Configured android\local.properties
+type android\local.properties
 echo.
 
 :: ------------------------------------------------------------
