@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "ZenChat",
+    "slug": "zenchat",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F7F7F3"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.zenchat.app",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "ZenChat uses Bluetooth to discover nearby people and send direct messages without internet.",
+        "NSBluetoothPeripheralUsageDescription": "ZenChat uses Bluetooth to allow nearby people to discover your device and send you messages."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F7F7F3"
+      },
+      "package": "com.zenchat.app",
+      "permissions": [
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "BLUETOOTH_SCAN",
+        "BLUETOOTH_ADVERTISE",
+        "BLUETOOTH_CONNECT",
+        "ACCESS_FINE_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
