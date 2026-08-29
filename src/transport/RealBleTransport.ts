@@ -42,6 +42,10 @@ export class RealBleTransport implements MessageTransport {
   private peerSubscription: any = null;
   private messageSubscription: any = null;
   private errorSubscription: any = null;
+  private logSubscription: any = null;
+
+  private debugLogs: string[] = [];
+  private logListeners: Set<(logs: string[]) => void> = new Set();
 
   constructor() {
     if (ZenChatBle) {
@@ -239,8 +243,38 @@ export class RealBleTransport implements MessageTransport {
       'onBleError',
       (err: any) => {
         console.warn('[RealBleTransport] Native BLE warning:', err);
+        this.addLog(`[ERROR] ${err?.error || JSON.stringify(err)}`);
       }
     );
+
+    // 4. Live BLE Debug Log
+    this.logSubscription = this.eventEmitter.addListener(
+      'onBleLog',
+      (data: { log: string }) => {
+        if (data && data.log) {
+          this.addLog(data.log);
+        }
+      }
+    );
+  }
+
+  onLogsChanged(callback: (logs: string[]) => void): () => void {
+    this.logListeners.add(callback);
+    callback(this.debugLogs);
+    return () => {
+      this.logListeners.delete(callback);
+    };
+  }
+
+  private addLog(msg: string) {
+    const time = new Date().toLocaleTimeString();
+    const entry = `[${time}] ${msg}`;
+    this.debugLogs = [entry, ...this.debugLogs.slice(0, 35)];
+    this.logListeners.forEach((cb) => {
+      try {
+        cb(this.debugLogs);
+      } catch {}
+    });
   }
 
   private removeNativeListeners(): void {
@@ -255,6 +289,10 @@ export class RealBleTransport implements MessageTransport {
     if (this.errorSubscription) {
       this.errorSubscription.remove();
       this.errorSubscription = null;
+    }
+    if (this.logSubscription) {
+      this.logSubscription.remove();
+      this.logSubscription = null;
     }
   }
 

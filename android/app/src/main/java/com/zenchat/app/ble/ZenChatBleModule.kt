@@ -23,6 +23,8 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
         val SERVICE_UUID: UUID = UUID.fromString("0000FE60-0000-1000-8000-00805F9B34FB")
         val CHAR_UUID: UUID = UUID.fromString("0000FE61-0000-1000-8000-00805F9B34FB")
         val PARCEL_SERVICE_UUID: ParcelUuid = ParcelUuid(SERVICE_UUID)
+        const val MANUFACTURER_ID_USER = 0xFE60
+        const val MANUFACTURER_ID_NAME = 0xFE61
     }
 
     private val bluetoothManager: BluetoothManager? by lazy {
@@ -40,9 +42,18 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
     private var isScanning = false
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val discoveredDevices = ConcurrentHashMap<String, String>()
+    private val discoveredAddresses = ConcurrentHashMap<String, String>() // userId -> MAC address
+    private val discoveredNames = ConcurrentHashMap<String, String>() // userId -> Display Name
 
     override fun getName(): String = MODULE_NAME
+
+    private fun log(msg: String) {
+        val map = Arguments.createMap().apply {
+            putString("log", msg)
+            putDouble("timestamp", System.currentTimeMillis().toDouble())
+        }
+        sendEvent("onBleLog", map)
+    }
 
     private fun sendEvent(eventName: String, params: WritableMap) {
         try {
@@ -61,8 +72,8 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
             promise.resolve(false)
             return
         }
-        val isAdvSupported = adapter.isMultipleAdvertisementSupported
-        promise.resolve(isAdvSupported)
+        val isAdv = adapter.isMultipleAdvertisementSupported
+        promise.resolve(isAdv)
     }
 
     @ReactMethod
@@ -83,13 +94,15 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
     fun startAdvertising(userId: String, displayName: String, promise: Promise) {
         val adapter = bluetoothAdapter
         if (adapter == null || !adapter.isEnabled) {
+            log("[ADV] Cannot start: Bluetooth is OFF")
             promise.reject("BLE_OFF", "Bluetooth is disabled.")
             return
         }
 
         val adv = adapter.bluetoothLeAdvertiser
         if (adv == null) {
-            promise.reject("NO_ADVERTISER", "Device does not support BLE Peripheral mode.")
+            log("[ADV] Hardware error: BLE Multiple Advertisement not supported on this phone")
+            promise.reject("NO_ADVERTISER", "Device does not support BLE Peripheral advertising.")
             return
         }
 
@@ -104,25 +117,26 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
                 .setTimeout(0)
                 .build()
 
-            // Service payload format: "ZC:<userId>:<displayName>"
-            val payload = "ZC:$userId:$displayName"
-            val payloadBytes = payload.toByteArray(StandardCharsets.UTF_8)
+            // Ultra-compact payload to guarantee fitting within the 31-byte limit
+            val userPayload = "ZC:$userId".toByteArray(StandardCharsets.UTF_8)
+            val namePayload = displayName.take(18).toByteArray(StandardCharsets.UTF_8)
 
             val dataBuilder = AdvertiseData.Builder()
                 .setIncludeDeviceName(false)
                 .setIncludeTxPowerLevel(false)
                 .addServiceUuid(PARCEL_SERVICE_UUID)
-                .addServiceData(PARCEL_SERVICE_UUID, payloadBytes)
+                .addManufacturerData(MANUFACTURER_ID_USER, userPayload)
 
             val scanResponseBuilder = AdvertiseData.Builder()
-                .setIncludeDeviceName(true)
-                .addServiceUuid(PARCEL_SERVICE_UUID)
+                .setIncludeDeviceName(false)
+                .addManufacturerData(MANUFACTURER_ID_NAME, namePayload)
 
+            log("[ADV] Starting advertising (ID: $userId, Name: $displayName)...")
             adv.startAdvertising(settings, dataBuilder.build(), scanResponseBuilder.build(), advertiseCallback)
             advertiser = adv
-            isAdvertising = true
             promise.resolve(true)
         } catch (e: Exception) {
+            log("[ADV] Exception starting advertising: ${e.message}")
             promise.reject("ADVERTISE_ERROR", e.message, e)
         }
     }
@@ -141,6 +155,7 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
             gattServer?.close()
             gattServer = null
             isAdvertising = false
+            log("[ADV] Advertising stopped")
         } catch (e: Exception) {
             // Ignore
         }
@@ -149,12 +164,22 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
     private val advertiseCallback = object : AdvertiseCallback() {
         override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
             isAdvertising = true
+            log("[ADV] Advertising started successfully! Nearby devices can now discover this phone.")
         }
 
         override fun onStartFailure(errorCode: Int) {
             isAdvertising = false
+            val errorText = when (errorCode) {
+                ADVERTISE_FAILED_DATA_TOO_LARGE -> "Data too large (>31 bytes)"
+                ADVERTISE_FAILED_TOO_MANY_ADVERTISERS -> "Too many advertisers running"
+                ADVERTISE_FAILED_ALREADY_STARTED -> "Advertising already started"
+                ADVERTISE_FAILED_INTERNAL_ERROR -> "Internal Bluetooth driver error"
+                ADVERTISE_FAILED_FEATURE_UNSUPPORTED -> "BLE advertising unsupported by hardware"
+                else -> "Error code $errorCode"
+            }
+            log("[ADV] Failed to advertise: $errorText")
             val map = Arguments.createMap().apply {
-                putString("error", "Advertise failed code $errorCode")
+                putString("error", "Advertise failed: $errorText")
             }
             sendEvent("onBleError", map)
         }
@@ -176,6 +201,7 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
             ) {
                 if (characteristic.uuid == CHAR_UUID && value != null) {
                     val rawString = String(value, StandardCharsets.UTF_8)
+                    log("[GATT] Received ${value.size} bytes from ${device.address}")
                     val map = Arguments.createMap().apply {
                         putString("rawPacket", rawString)
                         putString("deviceAddress", device.address)
@@ -217,34 +243,36 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
     fun startScan(promise: Promise) {
         val adapter = bluetoothAdapter
         if (adapter == null || !adapter.isEnabled) {
+            log("[SCAN] Cannot start: Bluetooth is OFF")
             promise.reject("BLE_OFF", "Bluetooth is disabled.")
             return
         }
 
         val sc = adapter.bluetoothLeScanner
         if (sc == null) {
+            log("[SCAN] Error: BluetoothLeScanner is null")
             promise.reject("NO_SCANNER", "BLE Scanner is not available.")
             return
         }
 
         try {
             stopScanInternal()
-            discoveredDevices.clear()
-
-            val filter = ScanFilter.Builder()
-                .setServiceUuid(PARCEL_SERVICE_UUID)
-                .build()
+            discoveredAddresses.clear()
+            discoveredNames.clear()
 
             val settings = ScanSettings.Builder()
                 .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                 .setReportDelay(0)
                 .build()
 
-            sc.startScan(listOf(filter), settings, scanCallback)
+            // Run open scan with in-app software filtering for 100% manufacturer chipset compatibility
+            log("[SCAN] Starting low-latency BLE scan...")
+            sc.startScan(null, settings, scanCallback)
             scanner = sc
             isScanning = true
             promise.resolve(true)
         } catch (e: Exception) {
+            log("[SCAN] Exception starting scan: ${e.message}")
             promise.reject("SCAN_ERROR", e.message, e)
         }
     }
@@ -261,6 +289,7 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
                 scanner?.stopScan(scanCallback)
             }
             isScanning = false
+            log("[SCAN] Scan stopped")
         } catch (e: Exception) {
             // Ignore
         }
@@ -272,36 +301,64 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
             val record = res.scanRecord ?: return
             val device = res.device ?: return
 
-            // Extract service data payload
-            var payloadStr: String? = null
-            val serviceData = record.getServiceData(PARCEL_SERVICE_UUID)
-            if (serviceData != null) {
-                payloadStr = String(serviceData, StandardCharsets.UTF_8)
-            } else if (record.deviceName != null && record.deviceName!!.startsWith("ZC:")) {
-                payloadStr = record.deviceName
+            var foundUserId: String? = null
+            var foundDisplayName: String? = null
+
+            // 1. Check Service UUID
+            val serviceUuids = record.serviceUuids
+            val hasServiceUuid = serviceUuids?.any { it == PARCEL_SERVICE_UUID } == true
+
+            // 2. Check Manufacturer Data (0xFE60 for userId, 0xFE61 for displayName)
+            val userBytes = record.getManufacturerSpecificData(MANUFACTURER_ID_USER)
+            if (userBytes != null) {
+                val str = String(userBytes, StandardCharsets.UTF_8)
+                if (str.startsWith("ZC:")) {
+                    foundUserId = str.substring(3).trim().uppercase()
+                }
             }
 
-            if (payloadStr != null && payloadStr.startsWith("ZC:")) {
-                val parts = payloadStr.split(":")
-                if (parts.size >= 3) {
-                    val userId = parts[1].trim().uppercase()
-                    val displayName = parts.subList(2, parts.size).joinToString(":").trim()
+            val nameBytes = record.getManufacturerSpecificData(MANUFACTURER_ID_NAME)
+            if (nameBytes != null) {
+                foundDisplayName = String(nameBytes, StandardCharsets.UTF_8).trim()
+            }
 
-                    discoveredDevices[userId] = device.address
-
-                    val map = Arguments.createMap().apply {
-                        putString("userId", userId)
-                        putString("displayName", displayName)
-                        putString("deviceAddress", device.address)
-                        putInt("rssi", res.rssi)
+            // 3. Fallback: check device name or service data
+            if (foundUserId == null) {
+                val serviceData = record.getServiceData(PARCEL_SERVICE_UUID)
+                if (serviceData != null) {
+                    val str = String(serviceData, StandardCharsets.UTF_8)
+                    if (str.startsWith("ZC:")) {
+                        val parts = str.split(":")
+                        if (parts.size >= 3) {
+                            foundUserId = parts[1].trim().uppercase()
+                            foundDisplayName = parts.subList(2, parts.size).joinToString(":").trim()
+                        }
                     }
-                    sendEvent("onPeerDiscovered", map)
                 }
+            }
+
+            if (foundUserId != null) {
+                val finalName = foundDisplayName ?: discoveredNames[foundUserId] ?: "User ${foundUserId.take(4)}"
+                discoveredAddresses[foundUserId] = device.address
+                if (foundDisplayName != null) {
+                    discoveredNames[foundUserId] = foundDisplayName
+                }
+
+                log("[PEER] Discovered ZenChat Peer: $finalName ($foundUserId) @ ${device.address} (RSSI: ${res.rssi} dBm)")
+
+                val map = Arguments.createMap().apply {
+                    putString("userId", foundUserId)
+                    putString("displayName", finalName)
+                    putString("deviceAddress", device.address)
+                    putInt("rssi", res.rssi)
+                }
+                sendEvent("onPeerDiscovered", map)
             }
         }
 
         override fun onScanFailed(errorCode: Int) {
             isScanning = false
+            log("[SCAN] Scan failed with code $errorCode")
             val map = Arguments.createMap().apply {
                 putString("error", "Scan failed code $errorCode")
             }
@@ -327,14 +384,22 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
         val payloadBytes = rawPacket.toByteArray(StandardCharsets.UTF_8)
         var hasResolved = false
 
+        log("[SEND] Connecting to ${device.address} (${payloadBytes.size} bytes)...")
+
         mainHandler.post {
             var gattClient: BluetoothGatt? = null
 
             val gattCallback = object : BluetoothGattCallback() {
                 override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
                     if (newState == BluetoothProfile.STATE_CONNECTED) {
-                        gatt.discoverServices()
+                        log("[SEND] Connected to ${device.address}! Requesting MTU 512...")
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            gatt.requestMtu(512)
+                        } else {
+                            gatt.discoverServices()
+                        }
                     } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                        log("[SEND] Disconnected from ${device.address}")
                         gatt.close()
                         if (!hasResolved) {
                             hasResolved = true
@@ -343,12 +408,18 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
                     }
                 }
 
+                override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+                    log("[SEND] MTU negotiated: $mtu bytes. Discovering services...")
+                    gatt.discoverServices()
+                }
+
                 override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
                     if (status == BluetoothGatt.GATT_SUCCESS) {
                         val service = gatt.getService(SERVICE_UUID)
                         val characteristic = service?.getCharacteristic(CHAR_UUID)
 
                         if (characteristic != null) {
+                            log("[SEND] Writing message packet to GATT characteristic...")
                             characteristic.value = payloadBytes
                             characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
                             val writeSuccess = gatt.writeCharacteristic(characteristic)
@@ -356,7 +427,7 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
                                 hasResolved = true
                                 gatt.disconnect()
                                 gatt.close()
-                                promise.reject("WRITE_FAILED", "Could not write to characteristic.")
+                                promise.reject("WRITE_FAILED", "Could not write characteristic.")
                             }
                         } else if (!hasResolved) {
                             hasResolved = true
@@ -379,6 +450,7 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
                 ) {
                     if (!hasResolved) {
                         hasResolved = true
+                        log("[SEND] Write completed with status $status! Message delivered.")
                         gatt.disconnect()
                         gatt.close()
                         if (status == BluetoothGatt.GATT_SUCCESS) {
@@ -397,7 +469,6 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
                     device.connectGatt(reactContext, false, gattCallback)
                 }
 
-                // Safety timeout: 8 seconds
                 mainHandler.postDelayed({
                     if (!hasResolved) {
                         hasResolved = true
@@ -405,9 +476,9 @@ class ZenChatBleModule(private val reactContext: ReactApplicationContext) :
                             gattClient?.disconnect()
                             gattClient?.close()
                         } catch (e: Exception) {}
-                        promise.reject("TIMEOUT", "Send timed out. Peer is not responding.")
+                        promise.reject("TIMEOUT", "Send timed out. Recipient device did not acknowledge in time.")
                     }
-                }, 8000)
+                }, 9000)
             } catch (e: Exception) {
                 if (!hasResolved) {
                     hasResolved = true

@@ -14,6 +14,7 @@ type TransportContextType = {
   isMock: boolean;
   incomingMessage: MessagePacket | null;
   diagnostic: BluetoothDiagnostic | null;
+  debugLogs: string[];
   refreshPermissions: () => Promise<void>;
   dismissIncomingMessage: () => void;
   refreshPeers: () => Promise<void>;
@@ -39,6 +40,7 @@ export const TransportProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [status, setStatus] = useState<TransportStatus>('ready');
   const [incomingMessage, setIncomingMessage] = useState<MessagePacket | null>(null);
   const [diagnostic, setDiagnostic] = useState<BluetoothDiagnostic | null>(null);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
 
   const mockTransport = useMemo(() => new MockTransport(), []);
   const realTransport = useMemo(() => new RealBleTransport(), []);
